@@ -1,86 +1,99 @@
 import { Editor, MarkdownView, Notice, Plugin, TFile } from "obsidian";
-import { EditorView, ViewPlugin, ViewUpdate, PluginValue } from '@codemirror/view';
+import { EditorView, ViewPlugin, ViewUpdate, PluginValue, Decoration, DecorationSet, WidgetType } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 
 // Step 1: Create a dictionary of veterinary terms and their completions
 const vetCompletions = {
-    "temp:": "temperature is normal at 101.5°F",
-    "hx:": "history of presenting complaint: ",
-    "pe:": "physical examination reveals ",
-    "rx:": "prescribed medication: ",
-    "dx:": "diagnosis: ",
-    "lab:": "laboratory results show ",
-    "vax:": "vaccination status: up to date with ",
-    "wt:": "weight: kg, BCS 3/5"
+	"temp" : "erature",
+	"his" : "tory",
+	"phy" : "iscal",
+	"diag" : "nosis"
 };
+
 
 export default class MyPlugin extends Plugin {
     async onload() {		
-        const inputDetectionExtension = ViewPlugin.fromClass(InputDetectionPlugin);        
+        const inputDetectionExtension = ViewPlugin.fromClass(InputDetectionPlugin, {
+            // Expose decorations to the editor
+            decorations: v => v.decorations
+        });        
 		this.registerEditorExtension([
 			inputDetectionExtension
 		]);
     }
-
     onunload() {
         console.log('unloading plugin');
     }
 }
 
-// Step 2: Enhance the Input Detection Plugin
+// Widget for displaying completions as ghost text
+class CompletionWidget extends WidgetType {
+    constructor(readonly completion: string) {
+        super();
+    }
+    
+    toDOM() {
+        const span = document.createElement("span");
+        span.textContent = this.completion;
+        span.style.opacity = "0.4"; // Ghost text appearance
+        return span;
+    }
+}
+
 class InputDetectionPlugin implements PluginValue {
+    // Add a field to track decorations
+    decorations: DecorationSet = Decoration.none;
+    
 	constructor(view: EditorView) {
         console.log('Input detection plugin initialized');
     }
     
-	update(update: ViewUpdate) {
+    update(update: ViewUpdate) {
         // Only process if there was a document change
         if (update.docChanged) {
-            // Get the text before the cursor
-            const prefix = this.getTextBeforeCursor(update);
+            const prefix = this.getPrefix(update);
+            const completion = this.getCompletions(prefix);
             
-            // Check for potential completions
-            const completion = this.checkForCompletions(prefix);
-            
-            // Log potential completion to console
             if (completion) {
-                console.log("🐾 Vet completion found:", completion);
-                this.debugTextContext(update); // Log additional context for debugging
+                // Create decoration to display the completion
+                this.decorations = this.createCompletionDecoration(update.view, completion);
+                console.log('found completion:', completion);
+            } else {
+                // Clear decorations when no completion
+                this.decorations = Decoration.none;
             }
         }
-	}
-    
-    // Step 3: Helper Functions for Text Analysis
-    
-    // Get text before the cursor
-    private getTextBeforeCursor(update: ViewUpdate): string {
-        const cursor = update.state.selection.main.head;
-        const line = update.state.doc.lineAt(cursor);
-        return line.text.slice(0, cursor - line.from);
     }
     
-    // Check if the text matches any completion triggers
-    private checkForCompletions(text: string): string | null {
-        // Check for exact matches (like "temp:")
+    getPrefix(update: ViewUpdate): string {
+        const cursorPos = update.state.selection.main.head;
+        const line = update.state.doc.lineAt(cursorPos);
+        const prefix = line.text.slice(0, cursorPos - line.from);
+        return prefix;
+    }
+    
+    getCompletions(text: string): string | null {
         for (const [trigger, completion] of Object.entries(vetCompletions)) {
             if (text.endsWith(trigger)) {
                 return completion;
             }
         }
-        
-        return null; // No match found
+        return null;
     }
     
-    // Debug helper to log text context
-    private debugTextContext(update: ViewUpdate): void {
-        const cursor = update.state.selection.main.head;
-        const line = update.state.doc.lineAt(cursor);
+    // Method to create decoration for the completion
+    createCompletionDecoration(view: EditorView, completion: string) {
+        const cursorPos = view.state.selection.main.head;
         
-        console.log({
-            fullLine: line.text,
-            cursorPosition: cursor - line.from,
-            textBeforeCursor: line.text.slice(0, cursor - line.from),
-            textAfterCursor: line.text.slice(cursor - line.from)
+        // Create widget to display completion
+        const widget = new CompletionWidget(completion);
+        
+        // Create decoration at cursor position
+        const decoration = Decoration.widget({
+            widget,
+            side: 1 // After cursor
         });
+        
+        return Decoration.set([decoration.range(cursorPos)]);
     }
 }
